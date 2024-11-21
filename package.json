@@ -19,6 +19,7 @@
   "version": "1.0.0",
   "main": "main.js",
   "scripts": {
+    "postinstall": "npx playwright install",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
