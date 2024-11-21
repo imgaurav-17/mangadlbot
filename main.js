@@ -1,3 +1,10 @@
+const express = require('express');
+const app = express();
+const port = process.env.PORT || 10000;
+
+app.listen(port, '0.0.0.0', () => {
+    console.log(`Server running on port ${port}`);
+});
 import { Telegraf } from 'telegraf';
 import axios from 'axios';
 import fs from 'fs';
