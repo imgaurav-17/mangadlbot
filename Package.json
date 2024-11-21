@@ -1,0 +1,26 @@
+{
+  "type": "module",
+  "dependencies": {
+    "axios": "^1.6.8",
+    "cheerio": "^1.0.0-rc.12",
+    "dotenv": "^16.4.5",
+    "env": "^0.0.2",
+    "get-stream": "^9.0.1",
+    "mongodb": "^6.6.0",
+    "node-telegram-bot-api": "^0.65.1",
+    "pdfkit": "^0.15.0",
+    "playwright": "^1.44.0",
+    "puppeteer": "^22.7.1",
+    "sharp": "^0.33.3",
+    "telegraf": "^4.16.3"
+  },
+  "name": "manga-to-pdf",
+  "version": "1.0.0",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": ""
+}
