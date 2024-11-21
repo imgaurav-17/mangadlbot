@@ -66,109 +66,130 @@ bot.on('text', async (ctx) => {
   const userId = String(ctx.from.id);
   const message = ctx.message.text;
 
-  if (state[userId]?.waitingForRenameConfirmation) {
+  if (state[userId] && state[userId].waitingForRenameConfirmation) {
     clearTimeout(state[userId].timeout);
     if (message.toLowerCase() === 'yes') {
       state[userId].waitingForRenameConfirmation = false;
       state[userId].waitingForNewName = true;
       await ctx.reply('Please enter the new name for the PDF file (without extension):');
       state[userId].timeout = setTimeout(() => {
-        delete state[userId];
+        state[userId] = null;
         ctx.reply('You did not respond in time. The renaming process has been aborted.');
       }, 60000);
     } else {
       state[userId].waitingForRenameConfirmation = false;
       state[userId].newName = 'images';
       await createPDF(ctx, state[userId].url, state[userId].newName);
-      delete state[userId];
+      state[userId] = null;
     }
     return;
-  }
-
-  if (state[userId]?.waitingForNewName) {
+  } else if (state[userId] && state[userId].waitingForNewName) {
     clearTimeout(state[userId].timeout);
     state[userId].newName = message;
     await createPDF(ctx, state[userId].url, state[userId].newName);
-    delete state[userId];
+    state[userId] = null;
     return;
+  } else {
+    state[userId] = { url: message, waitingForRenameConfirmation: true };
+    await ctx.reply('Do you want to rename the PDF file? (yes/no)');
+    state[userId].timeout = setTimeout(() => {
+      state[userId] = null;
+      ctx.reply('You did not respond in time. The renaming process has been aborted.');
+    }, 60000);
   }
-
-  state[userId] = { url: message, waitingForRenameConfirmation: true };
-  await ctx.reply('Do you want to rename the PDF file? (yes/no)');
-  state[userId].timeout = setTimeout(() => {
-    delete state[userId];
-    ctx.reply('You did not respond in time. The renaming process has been aborted.');
-  }, 60000);
 });
 
 async function createPDF(ctx, url, newName) {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch();
   const page = await browser.newPage();
-
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120000 });
-    const images = await page.$$eval('img', imgs => imgs.map(img => img.src));
-    await generatePDF(ctx, images, newName);
   } catch (error) {
-    console.error('Error navigating to the page:', error);
-    await ctx.reply('Failed to load the page. Please check the URL.');
-  } finally {
-    await browser.close();
+    console.error('Navigation timed out', error);
   }
-}
 
-async function generatePDF(ctx, images, newName) {
   const pdf = new PDFDocument();
   const pdfStream = fs.createWriteStream(`${newName}.pdf`);
   pdf.pipe(pdfStream);
 
-  const downloadPromises = images.map(image => downloadAndAddImage(pdf, image));
+  let filenames = [];
+
+  const images = await page.$$eval('img', imgs => imgs.map(img => img.src));
+  console.log('Image URLs:', images);
+
+  const downloadPromises = images.map(async (image, index) => {
+    if (!image.startsWith('data:') && (image.endsWith('.jpg') || image.endsWith('.jpeg') || image.endsWith('.webp'))) {
+      try {
+        const response = await axios.get(image, { 
+          responseType: 'arraybuffer',
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3' }
+        });
+
+        let buffer = Buffer.from(response.data, 'binary');
+
+        if (image.endsWith('.webp')) {
+          buffer = await sharp(buffer).jpeg().toBuffer();
+        }
+
+        const filename = `image-${Date.now()}.jpg`;
+        fs.writeFileSync(filename, buffer);
+        filenames.push({ filename, index });
+
+      } catch (error) {
+        console.error(`Failed to download image ${image}:`, error);
+      }
+    } else {
+      console.log(`Skipping unsupported image format: ${image}`);
+    }
+  });
+
   await Promise.all(downloadPromises);
 
+  filenames.sort((a, b) => a.index - b.index);
+
+  for (const { filename } of filenames) {
+    try {
+      const { width, height } = await sharp(filename).metadata();
+
+      pdf.addPage({
+        size: [width, height]
+      });
+
+      pdf.image(filename, 0, 0, { width: width, height: height });
+    } catch (error) {
+      console.error(`Failed to add image ${filename} to PDF:`, error);
+    }
+  }
+
   pdf.end();
+
   await new Promise(resolve => pdfStream.on('finish', resolve));
 
   try {
-    await ctx.replyWithDocument({ source: fs.createReadStream(`${newName}.pdf`), filename: `${newName}.pdf` });
+    const readStream = fs.createReadStream(`${newName}.pdf`);
+    await ctx.replyWithDocument({ source: readStream, filename: `${newName}.pdf` });
   } catch (error) {
     console.error('Failed to send PDF:', error);
     await ctx.reply('Sorry, there was an error sending the PDF. Please try again.');
-  } finally {
-    cleanupFiles(newName);
   }
-}
 
-async function downloadAndAddImage(pdf, image) {
-  if (!image.startsWith('data:') && (image.endsWith('.jpg') || image.endsWith('.jpeg') || image.endsWith('.webp'))) {
+  for (const { filename } of filenames) {
     try {
-      const response = await axios.get(image, { responseType: 'arraybuffer' });
-      let buffer = Buffer.from(response.data, 'binary');
-
-      if (image.endsWith('.webp')) {
-        buffer = await sharp(buffer).jpeg().toBuffer();
+      if (fs.existsSync(filename)) {
+        fs.unlinkSync(filename);
       }
-
-      const filename = `temp-${Date.now()}.jpg`;
-      fs.writeFileSync(filename, buffer);
-      const { width, height } = await sharp(filename).metadata();
-
-      pdf.addPage({ size: [width, height] });
-      pdf.image(filename, 0, 0, { width, height });
-      fs.unlinkSync(filename);
     } catch (error) {
-      console.error(`Failed to download or process image ${image}:`, error);
+      console.error(`Failed to delete image file ${filename}:`, error);
     }
-  } else {
-    console.log(`Skipping unsupported image format: ${image}`);
   }
-}
 
-function cleanupFiles(newName) {
   try {
-    fs.unlinkSync(`${newName}.pdf`);
+    if (fs.existsSync(`${newName}.pdf`)) {
+      fs.unlinkSync(`${newName}.pdf`);
+    }
   } catch (error) {
     console.error(`Failed to delete PDF file ${newName}.pdf:`, error);
   }
-}
+}  
 
 bot.launch();
