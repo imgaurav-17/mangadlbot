@@ -1,0 +1,4 @@
+BOT_TOKEN = "tgbot_token"
+ORIGINAL_ADMIN_ID = "tgUserid"
+MONGODB_URI = "Mongodb URI"
+MONGODB_DB_NAME = "test"
